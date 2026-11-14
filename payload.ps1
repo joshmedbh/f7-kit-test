@@ -120,6 +120,7 @@ using Org.BouncyCastle.Crypto.Modes;
 using Org.BouncyCastle.Crypto.Parameters;
 public static class Gcm {
   public static int LastStatus;
+  public static string LastError;
   public static byte[] Dec(byte[] key, byte[] nonce, byte[] ctTag, byte[] aad) {
     try {
       GcmBlockCipher c = new GcmBlockCipher(new AesEngine());
@@ -127,13 +128,14 @@ public static class Gcm {
       byte[] o = new byte[c.GetOutputSize(ctTag.Length)];
       int n = c.ProcessBytes(ctTag, 0, ctTag.Length, o, 0);
       n += c.DoFinal(o, n);
-      if (n != o.Length) { byte[] t = new byte[n]; Array.Copy(o, t, n); return t; }
+      if (n != o.Length) { LastError = "n=" + n + " out=" + o.Length + " in=" + ctTag.Length; byte[] t = new byte[n]; Array.Copy(o, t, n); return t; }
       return o;
-    } catch (Exception e) { LastStatus = e.HResult; return null; }
+    } catch (Exception e) { LastStatus = e.HResult; LastError = e.GetType().Name + ": " + e.Message; return null; }
   }
 }
 "@ -ReferencedAssemblies $BC -ErrorAction Stop
     if (-not ('Gcm' -as [type])) { throw 'tipo Gcm nao compilou' }
+    [Reflection.Assembly]::LoadFrom($BC) | Out-Null
     $script:GcmMode = 'csharp'
   } catch {}
   if (-not $script:GcmMode) {
@@ -169,7 +171,7 @@ function Dec-Bytes($key, $blob, $aad) {
       if ($n -eq $o.Length) { return $o }
       return $o[0..($n - 1)]
     }
-  } catch { return $null }
+  } catch { $script:GcmErr = $_.Exception.Message; return $null }
   return $null
 }
 $sqlite = Join-Path $PSScriptRoot 'sqlite3.exe'
