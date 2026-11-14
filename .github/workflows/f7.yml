@@ -14,6 +14,23 @@ jobs:
           Start-Sleep 8
           "defender=" + (Get-MpComputerStatus).RealTimeProtectionEnabled
           (Get-MpPreference).ExclusionPath
+      - name: teste gcm+dpapi (ps5.1)
+        shell: pwsh
+        run: |
+          $key = [byte[]]::new(32); [Security.Cryptography.RandomNumberGenerator]::Fill($key)
+          $nonce = [byte[]]::new(12); [Security.Cryptography.RandomNumberGenerator]::Fill($nonce)
+          $pt = 'SEGREDO-ABC-123'
+          $aes = [Security.Cryptography.AesGcm]::new($key)
+          $ct = [byte[]]::new($pt.Length); $tag = [byte[]]::new(16)
+          $aes.Encrypt($nonce, [Text.Encoding]::UTF8.GetBytes($pt), $ct, $tag, [Text.Encoding]::UTF8.GetBytes('https://exemplo.test'))
+          $blob = [byte[]]([Text.Encoding]::ASCII.GetBytes('v10') + $nonce + $ct + $tag)
+          $hex = { param($b) ($b | ForEach-Object { $_.ToString('x2') }) -join '' }
+          Add-Type -AssemblyName System.Security
+          $prot = [Security.Cryptography.ProtectedData]::Protect($key, $null, 'CurrentUser')
+          $enc = [Convert]::ToBase64String([byte[]]([Text.Encoding]::ASCII.GetBytes('DPAPI') + $prot))
+          $ls = Join-Path $env:TEMP 'ls.json'
+          '{"os_crypt":{"encrypted_key":"' + $enc + '"}}' | Set-Content $ls
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\dectest.ps1 -KeyHex (& $hex $key) -BlobHex (& $hex $blob) -LsPath $ls -Expect $pt
       - name: mount
         shell: pwsh
         run: |
