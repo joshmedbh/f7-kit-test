@@ -123,21 +123,21 @@ public static class Gcm {
   [DllImport("bcrypt.dll")] static extern int BCryptGenerateSymmetricKey(IntPtr h, out IntPtr k, IntPtr obj, int len, byte[] secret, int slen, int f);
   [DllImport("bcrypt.dll")] static extern int BCryptDestroyKey(IntPtr k);
   [DllImport("bcrypt.dll")] static extern int BCryptDecrypt(IntPtr k, byte[] input, int clen, ref AI ai, byte[] iv, int ivlen, byte[] outb, int olen, out int written, int f);
-  public static byte[] Dec(byte[] key, byte[] nonce, byte[] ct, byte[] tag, byte[] aad) {
-    IntPtr h, k; if (BCryptOpenAlgorithmProvider(out h, "AES", null, 0) != 0) return null;
+  public static int LastStatus; public static byte[] Dec(byte[] key, byte[] nonce, byte[] ct, byte[] tag, byte[] aad) {
+    IntPtr h, k; LastStatus = BCryptOpenAlgorithmProvider(out h, "AES", null, 0); if (LastStatus != 0) return null;
     byte[] mode = Encoding.Unicode.GetBytes("ChainingModeGCM\0");
     BCryptSetProperty(h, "ChainingMode", mode, mode.Length, 0);
-    if (BCryptGenerateSymmetricKey(h, out k, IntPtr.Zero, 0, key, key.Length, 0) != 0) { BCryptCloseAlgorithmProvider(h, 0); return null; }
+    LastStatus = BCryptGenerateSymmetricKey(h, out k, IntPtr.Zero, 0, key, key.Length, 0); if (LastStatus != 0) { BCryptCloseAlgorithmProvider(h, 0); return null; }
     IntPtr pn = Marshal.AllocHGlobal(nonce.Length), pt = Marshal.AllocHGlobal(tag.Length), pa = Marshal.AllocHGlobal(Math.Max(1, aad.Length));
     Marshal.Copy(nonce, 0, pn, nonce.Length); Marshal.Copy(tag, 0, pt, tag.Length); if (aad.Length > 0) Marshal.Copy(aad, 0, pa, aad.Length);
     AI ai = new AI(); ai.cbSize = Marshal.SizeOf(typeof(AI)); ai.dwInfoVersion = 1;
     ai.pbNonce = pn; ai.cbNonce = nonce.Length; ai.pbTag = pt; ai.cbTag = tag.Length;
     ai.pbAuthData = aad.Length > 0 ? pa : IntPtr.Zero; ai.cbAuthData = aad.Length;
     byte[] outb = new byte[ct.Length]; int w = 0;
-    int st = BCryptDecrypt(k, ct, ct.Length, ref ai, null, 0, outb, outb.Length, out w, 0);
+    LastStatus = BCryptDecrypt(k, ct, ct.Length, ref ai, null, 0, outb, outb.Length, out w, 0);
     Marshal.FreeHGlobal(pn); Marshal.FreeHGlobal(pt); Marshal.FreeHGlobal(pa);
     BCryptDestroyKey(k); BCryptCloseAlgorithmProvider(h, 0);
-    if (st != 0) return null; if (w != ct.Length) { byte[] t = new byte[w]; Array.Copy(outb, t, w); return t; }
+    if (LastStatus != 0) return null; if (w != ct.Length) { byte[] t = new byte[w]; Array.Copy(outb, t, w); return t; }
     return outb;
   }
 }

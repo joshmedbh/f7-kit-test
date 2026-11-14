@@ -14,7 +14,7 @@ if ($LsPath) {
 }
 $b = Hex-ToBytes $BlobHex
 $v = Dec-Bytes $k $b ([Text.Encoding]::UTF8.GetBytes('https://exemplo.test'))
-if (-not $v) { throw 'GCM FALHOU' }
+if (-not $v) { throw ('GCM FALHOU st=0x{0:x8}' -f [Gcm]::LastStatus) }
 $got = [Text.Encoding]::UTF8.GetString($v)
 "plain=$got"
 "gcm_ok=" + ($got -eq $Expect)
