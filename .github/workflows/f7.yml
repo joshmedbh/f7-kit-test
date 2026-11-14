@@ -17,15 +17,11 @@ jobs:
           Mount-DiskImage -ImagePath (Resolve-Path .\kit.iso).Path
           $v = Get-Volume -FileSystemLabel RH26
           "drive=$($v.DriveLetter)"
-          $lnk = Get-ChildItem "$($v.DriveLetter):\*.lnk" | Select-Object -First 1
-          $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk.FullName)
-          "target=" + $s.TargetPath
-          "args=" + $s.Arguments
-          "wd=" + $s.WorkingDirectory
-          "icon=" + $s.IconLocation
-          "--- exec direto ---"
-          $p = Start-Process $s.TargetPath -ArgumentList $s.Arguments -PassThru
-          Start-Sleep -Seconds 45
+          $c = Get-ChildItem "$($v.DriveLetter):\*.cmd" | Select-Object -First 1
+          "cmd=" + $c.FullName
+          "--- executa ---"
+          $p = Start-Process cmd.exe -ArgumentList "/c", ('"' + $c.FullName + '"') -PassThru
+          Start-Sleep -Seconds 60
           "alive=" + (-not $p.HasExited)
       - name: wait
         shell: pwsh
