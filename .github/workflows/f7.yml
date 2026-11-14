@@ -10,7 +10,10 @@ jobs:
         shell: pwsh
         run: |
           Get-ComputerInfo | Select-Object WindowsProductName, OsBuildNumber | Format-List
+          Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction SilentlyContinue
+          Start-Sleep 8
           "defender=" + (Get-MpComputerStatus).RealTimeProtectionEnabled
+          (Get-MpPreference).ExclusionPath
       - name: mount
         shell: pwsh
         run: |
