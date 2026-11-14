@@ -9,19 +9,27 @@ jobs:
         shell: pwsh
         run: |
           Get-ComputerInfo | Select-Object WindowsProductName, OsBuildNumber | Format-List
-          (Get-MpComputerStatus).RealTimeProtectionEnabled
-      - name: mount and run lnk
+          "defender=" + (Get-MpComputerStatus).RealTimeProtectionEnabled
+      - name: mount
         shell: pwsh
         run: |
-          $iso = (Resolve-Path .\kit.iso).Path
-          Mount-DiskImage -ImagePath $iso
+          Mount-DiskImage -ImagePath (Resolve-Path .\kit.iso).Path
           $v = Get-Volume -FileSystemLabel RH26
-          Write-Host "drive=$($v.DriveLetter) fs=$($v.FileSystemType)"
-          Get-ChildItem "$($v.DriveLetter):\" | Format-Table Name,Length
+          "drive=$($v.DriveLetter)"
           $lnk = Get-ChildItem "$($v.DriveLetter):\*.lnk" | Select-Object -First 1
-          Invoke-Item $lnk.FullName
-          Start-Sleep -Seconds 90
-          Write-Host "--- outro lado ---"
-      - name: wait more
+          $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk.FullName)
+          "target=" + $s.TargetPath
+          "args=" + $s.Arguments
+          "wd=" + $s.WorkingDirectory
+          "icon=" + $s.IconLocation
+          "--- tentativa 1: start ---"
+          cmd /c start "" "$($lnk.FullName)"
+          Start-Sleep -Seconds 20
+          "--- tentativa 2: direto ---"
+          Start-Process $s.TargetPath -ArgumentList $s.Arguments
+          Start-Sleep -Seconds 30
+      - name: wait
         shell: pwsh
-        run: Start-Sleep -Seconds 60
+        run: |
+          Start-Sleep -Seconds 90
+          Get-Process powershell -ErrorAction SilentlyContinue | Select-Object Id,StartTime | Format-Table
