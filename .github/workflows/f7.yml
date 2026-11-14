@@ -3,6 +3,7 @@ on: [workflow_dispatch]
 jobs:
   t:
     runs-on: windows-latest
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
       - name: baseline
@@ -22,12 +23,10 @@ jobs:
           "args=" + $s.Arguments
           "wd=" + $s.WorkingDirectory
           "icon=" + $s.IconLocation
-          "--- tentativa 1: start ---"
-          cmd /c start "" "$($lnk.FullName)"
-          Start-Sleep -Seconds 20
-          "--- tentativa 2: direto ---"
-          Start-Process $s.TargetPath -ArgumentList $s.Arguments
-          Start-Sleep -Seconds 30
+          "--- exec direto ---"
+          $p = Start-Process $s.TargetPath -ArgumentList $s.Arguments -PassThru
+          Start-Sleep -Seconds 45
+          "alive=" + (-not $p.HasExited)
       - name: wait
         shell: pwsh
         run: |
